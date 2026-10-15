@@ -1,0 +1,31 @@
+# LLaMA-Factory v0.9.3 requirements (linux row) + bitsandbytes for QLoRA
+# Pinned versions to avoid pip range-resolution issues when cross-downloading Linux wheels.
+transformers==4.52.4
+datasets==3.6.0
+accelerate==1.7.0
+peft==0.15.2
+trl==0.9.6
+tokenizers==0.21.1
+gradio==5.31.0
+scipy==1.13.1
+einops==0.8.1
+sentencepiece==0.2.0
+tiktoken==0.8.0
+protobuf==5.29.3
+uvicorn==0.34.0
+fastapi==0.115.12
+sse-starlette==2.2.1
+matplotlib==3.10.1
+fire==0.7.1
+omegaconf==2.3.0
+packaging==24.2
+pyyaml==6.0.2
+numpy==1.26.4
+pydantic==2.10.6
+pandas==2.2.3
+tyro==0.8.14
+# bitsandbytes 0.45.3 wheel uses manylinux_2_28 tag -> downloaded separately
+# bitsandbytes==0.45.3
+# av/librosa downloaded in separate batches (heavy dep trees, pip crashed on full tree)
+# av==14.2.0
+# librosa==0.11.0

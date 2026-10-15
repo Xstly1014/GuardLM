@@ -1,0 +1,21 @@
+# Training artifacts & logs (stay on WSL side, never in repo)
+saves/
+logs/
+*.log
+
+# Personal files (never push)
+*.pdf
+
+# Internal development docs (kept local, not part of the open-source repo)
+docs/
+
+# Tooling
+.trae/
+.vscode/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# OS
+Thumbs.db
+.DS_Store
