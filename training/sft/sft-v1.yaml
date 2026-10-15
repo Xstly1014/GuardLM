@@ -1,0 +1,50 @@
+# GuardLM M2: QLoRA SFT on content-safety instruction data (sft-v1)
+# 数据: data/sft/train.jsonl (12,148 条, 风险:none=1:3, 含五件套增强变体)
+# 用法 (WSL venv):
+#   llamafactory-cli train /mnt/e/workspace_work/GuardLM/training/sft/sft-v1.yaml
+# 超参依据: M2 手册超参决策表 (r16/a32 是分类任务甜点; lr1e-4 是 LoRA 标准量级;
+#           3 epoch JSON 任务通常收敛; cutoff 256 覆盖评测文本)
+
+### model
+model_name_or_path: /root/models/Qwen3-1.7B
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+quantization_bit: 4      # QLoRA 开关: 4bit NF4 基座, 权重显存 3.4G -> ~1G
+
+### dataset
+dataset: guardlm_sft
+dataset_dir: /root/LLaMA-Factory/data
+template: qwen3          # M0 结论: 模板选错 loss 不降
+cutoff_len: 256
+preprocessing_num_workers: 8
+overwrite_cache: true
+
+### train
+per_device_train_batch_size: 16
+gradient_accumulation_steps: 2   # 等效 batch 32
+learning_rate: 1.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+gradient_checkpointing: true
+max_grad_norm: 1.0
+
+### eval + output
+val_size: 0.05
+per_device_eval_batch_size: 16
+eval_strategy: steps
+eval_steps: 100
+output_dir: /root/saves/Qwen3-1.7B/guardlm-sft-v1
+logging_steps: 10
+save_steps: 100
+plot_loss: true
+report_to: tensorboard

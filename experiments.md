@@ -123,3 +123,41 @@ v2 合并后对话实测：
 4. 带出的坑（已修复）：未微调基座不遵循指定 JSON schema（探针解析需两级兜底）；PowerShell→WSL 传参引号转义破坏 curl/pipes（改用脚本文件执行）；synth raw 的 type 字段与人审表的 origin_label 字段名不一致（已对齐）
 
 ---
+
+## EXP-002 | M2 SFT：Harness v1 + QLoRA sft-v1 + 三档评测 + 错误归因
+
+- **日期**：2026-10-15
+- **目的**：搭建可复用评测 Harness（基线 base-v0）→ QLoRA SFT 训练 sft-v1 → 三档评测出分 → 错误归因四分类，为 M3/M4 提供路线图
+
+### 训练六要素
+
+| 要素 | 值 |
+|---|---|
+| 基座 | Qwen3-1.7B（QLoRA 4bit NF4, r16/a32/dropout0.05, target=all）|
+| 数据 | guardlm_sft 12,148 条（风险:none=1:3，含 282 条增强变体；instruction 尾部 /no_think）|
+| 超参 | lr 1e-4 / cosine / warmup 0.1 / 3 epochs / 等效 batch 32 / cutoff 256 |
+| 训练时长 | **12 分 16 秒**（1,083 步，吞吐 47 samples/s）|
+| 显存峰值 | **17.3 GB**（含桌面常驻 ~4.4G；memtest 同配置实测）|
+| loss | train 0.111（末段 0.003–0.005）/ eval 0.0056，末两次 eval 持平 → 无过拟合分叉 |
+
+### 评测结果（650 条，temperature=0.7 官方非思考参数）
+
+| 指标 | base-v0 | sft-v1 |
+|---|---|---|
+| 格式错误率 | 100% | **0.2%**（验收线 <3%）|
+| 总体 F1 / FPR | 0 / – | **0.862** / 0.71% |
+| T1 F1 / T2 对抗 Recall / T3 F1 | 0 | 0.873 / **0.800** / 0.805 |
+| T2 分扰动 | – | emoji 96% / fan 94% / 谐音 91% / split 80% / pinyin 69% / sp_attack 72% |
+
+### 错误归因四分类（134 错误 / 650，20 条人审复核通过）
+
+格式错误 0.7% / 类别混淆 17.9% / **对抗失效 38.8%（M4 GRPO）** / **边界误判 42.5%（M3 DPO）**；复核发现 ~20% gold 噪声（COLD 源标签争议，M3 需清洗）。
+
+### 结论
+
+1. **SFT 核心目标全部达成**：JSON 契约从 0 到 99.8% 遵循；格式错误率 0.2% 远优于 3% 验收线
+2. **五件套增强兑现**：表层扰动（emoji/繁体/谐音）召回 91–96%，但拼音变形 69% 是语义级短板
+3. **一句话结论**：sft-v1 的主要矛盾是边界误判（42.5%）与对抗失效（38.8%）双高——隐性语义边界和拼音变形是最大弱点，分别对应 M3 DPO 与 M4 GRPO
+4. 带出的坑（已修复）：① temperature=0.2 在 bf16 下 logits 数值放大触发 multinomial CUDA assert（改用官方 0.7）；② WSL2 cuDNN SDPA 批量左填充推理偶发 nan → CUDA device-side assert 不可恢复（attn_implementation=eager + logits nan_to_num 净化器双保险，吞吐反升至 15.2 samples/s）；③ PowerShell→WSL 多行 python -c 必炸（一律写脚本文件）
+
+---
