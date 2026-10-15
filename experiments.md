@@ -217,3 +217,60 @@ v2 合并后对话实测：
 5. 带出的坑（已修复）：① Windows 桌面程序（视频播放/Steam/ToDesk 等 20+ 进程）抢占 GPU 导致训练每步 9s→190s 甚至活锁，`wsl --shutdown` 重置 GPU 状态后恢复 4.3s/it；② StopCommand 只杀 PowerShell 侧 wsl.exe，WSL 内进程需 `pkill` + 注意命令串自匹配自杀；③ DPO batch=4 显存顶满（ref 模型常驻+双前向），降 2×16 后 18.9G 稳定
 
 ---
+
+## EXP-004 | M4 GRPO：RLVR 组合奖励 + 温度探针 + grpo-v1 三档评测
+
+- **日期**：2026-10-15
+- **目的**：针对 DPO 无法解决的对抗失效（T2 sp_attack/pinyin 漏放），用 GRPO（DeepSeek-R1 同款，组内相对优势）做泛化优化——奖励可验证（label 对错直接比对），无需奖励模型
+- **起点**：dpo-v2-merged（GRPO 起点 = KL 锚点，peft 模式 disable_adapter 免第二份模型显存）
+- **框架**：TRL 0.21 GRPOTrainer + QLoRA（r32 α4，对齐 DPO 配置）
+
+### 奖励函数设计（四组件各司一职，单测 20/20）
+
+| 组件 | 打分 | 设计意图 |
+|---|---|---|
+| format_reward | 干净 JSON 1.0 / 清洗 0.75 / repair 0.5 / 失败 0 | 巩固 SFT 格式成果防退化 |
+| correctness_reward | label 对 2.0 + risk 误差<0.2 加 0.5 | 核心任务信号，权重压倒格式 |
+| robust_reward | aug 样本且正确 → correctness ×0.5 叠加 | 对抗泛化信号 ×1.5 放大 |
+| length_penalty | 每超 20 token 扣 0.1 + 空 reason 扣 0.2 | 防 RL 输出膨胀经典坑 |
+
+- 离线 sanity：dpo-v2 真实输出喂分，正确样本均分 4.75 vs 错误 0.98（gap 3.77，信号可分）
+- prompt 池 2400 条：对抗 800（318 条模型真实错误变体 + 482 aug 补齐）+ 常规 1600（risk:none=1:3），与 650 条评测集严格隔离
+
+### 关键实验：温度探针（零优势组处置）
+
+- dry-run 暴露：`frac_reward_zero_std` 0.75-1.0 + entropy 0.006 nats/token——**DPO 后模型分布过尖，组内 8 采样高度雷同 → 无梯度**
+- 探针（24 prompt × G8 × temp {1.0, 1.2, 1.5}）：非零 std 组 33% / 46% / **50%**，fmt 均值 1.0 / 1.0 / 0.997
+- **裁决 temp=1.5**：有效梯度组翻倍且格式零损失——先诊断后调参，不盲改手册默认值
+
+### 训练（300 optimizer steps，24.8 分钟，5.03s/it）
+
+- 超参：G=8 / beta=0.04 / lr=5e-6 / temp=1.5 / max_completion=80 / batch 8×8=64 completions/step
+- 五指标全程监控：entropy 稳定 0.03±（无坍缩）/ KL ≤0.0026（锚定有效）/ reward 3.4-3.9 平稳 / completion 24 token 纹丝不动 / frac_zero_std 均值 ~0.6
+- 无三大失败模式触发（熵坍缩/奖励钻空子/格式退化）
+
+### 评测（650 条三档，与 dpo-v2 对比）
+
+| 指标 | dpo-v2 | grpo-v1 | Δ |
+|---|---|---|---|
+| 总体 F1 | 0.8669 | **0.8740** | +0.71pt |
+| T2 对抗 Recall | 0.8120 | **0.8280** | +1.6pt（主战场达成） |
+| T1 F1 | 0.8500 | 0.8713 | +2.13pt（修复 DPO 回退） |
+| FPR 误伤 | 3.57% | **2.86%** | -0.71pt（DPO 红线拉回） |
+| T3 F1 | 0.8281 | 0.8189 | -0.92pt（McNemar p=0.688，噪声） |
+| 格式错误率 | 0.15% | **0.00%** | 奖励组件生效 |
+| 长度漂移 | — | +0.1% | PASS（防住 RL 膨胀） |
+
+- 翻转分析：修复 19 / 回退 10 / **净 +9**（DPO 阶段为 -2）；T2 净 +7（p=0.092 边际显著）
+- 显著性检验：T3 回退 p=0.688 纯噪声；homophone -9.1pt 为 22 条小样本 2 条翻转波动
+- sp_attack +3.3pt / pinyin +3.8pt / emoji +4.0pt / illegal 召回 +3.6pt
+
+### 结论
+
+1. **GRPO 打破了 DPO 的「漏放↔误伤互换」僵局**：T2 Recall +1.6pt 与 FPR -0.71pt 同向改善（DPO 阶段两者是跷跷板），净翻转由 -2 转正 +9
+2. **总体 F1 四版本单调上升**：0.000 → 0.862 → 0.867 → **0.874**，grpo-v1 采纳为 M4 最终版
+3. **温度探针是本阶段最高杠杆动作**：DPO 收敛模型做 RL 起点，分布过尖 → 零优势组 >75%，升温 1.5 后有效梯度组翻倍——「dry-run 看指标 → 探针定参数」可复用为 RL 冷启动 SOP
+4. **奖励工程验证了「组合+增量」原则**：格式 0% / 长度零漂移 / FPR 下降，三个辅助组件全部兑现设计意图
+5. 带出的坑（已修复）：① trl 0.9.6 无 GRPOTrainer，升 1.14 会拉 transformers 5.x 与 torch 2.5 冲突 → 锚定 **trl 0.21 + transformers 4.56.1** 兼容组合；② TRL+peft 下 gradient_checkpointing 生成走 no-cache → logits nan（CUDA assert），patch `model.generate` 在生成期切 eval+cache+禁 ckpt、结束恢复训练态彻底解决；③ Dataset 列经 TRL 透传进奖励函数会被 json 序列化为字符串，奖励函数内需 `_maybe_json` 统一反序列化；④ transformers 4.56 中 `is_gradient_checkpointing` 是属性不是方法（API 变更）
+
+---
