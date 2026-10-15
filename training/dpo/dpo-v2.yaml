@@ -1,0 +1,53 @@
+# GuardLM M3: DPO v2 —— 偏好对方向修正版
+# 数据: data/rl/prefs-v2.jsonl (2176 对 = v1 2000 + none_mirror 176)
+#   dpo-v1 红线诊断: FPR 0.71%→3.57% 超红线, 但 KL≈0 → 不是漂移, 是方向失衡
+#   (判定对 chosen=风险:chosen=none = 742:25, 96.7% 单向)。
+#   v2 修正: +176 条 none_mirror (chosen=none / rejected=误伤 JSON), 方向比修至 21.3%
+# 变量控制: 相比 dpo-v1a 只动数据权重, β/lr/epoch 全部不变 (手册「每次只动一个变量」)
+# 训练起点: 从 sft-v1-merged 重新训练 (不从 dpo-v1 继续训, 避免偏移累积)
+
+### model
+model_name_or_path: /root/saves/Qwen3-1.7B/guardlm-sft-v1-merged
+trust_remote_code: true
+
+### method
+stage: dpo
+do_train: true
+pref_beta: 0.1
+pref_loss: sigmoid
+finetuning_type: lora
+lora_target: all
+lora_rank: 32
+lora_alpha: 4
+lora_dropout: 0.05
+quantization_bit: 4
+
+### dataset
+dataset: guardlm_dpo_v2
+dataset_dir: /root/LLaMA-Factory/data
+template: qwen3
+cutoff_len: 768
+preprocessing_num_workers: 8
+overwrite_cache: true
+
+### train
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16  # 等效 batch 32
+learning_rate: 1.0e-5            # v1a 验证有效 (5e-6 时 loss 卡 ln2 不动)
+num_train_epochs: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+gradient_checkpointing: true
+max_grad_norm: 1.0
+
+### eval + output
+val_size: 0.05
+per_device_eval_batch_size: 2
+eval_strategy: steps
+eval_steps: 20
+output_dir: /root/saves/Qwen3-1.7B/guardlm-dpo-v2
+logging_steps: 5
+save_steps: 100
+plot_loss: true
+report_to: tensorboard

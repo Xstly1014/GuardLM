@@ -1,0 +1,15 @@
+# GuardLM M3: 合并 sft-v1 LoRA 适配器为完整权重（DPO 的 ref 锚点必须是 sft-v1）
+# 用法 (WSL venv):
+#   llamafactory-cli export /mnt/e/workspace_work/GuardLM/training/sft/merge-sft-v1.yaml
+
+### model
+model_name_or_path: /root/models/Qwen3-1.7B
+adapter_name_or_path: /root/saves/Qwen3-1.7B/guardlm-sft-v1
+trust_remote_code: true
+
+### export
+template: qwen3
+export_dir: /root/saves/Qwen3-1.7B/guardlm-sft-v1-merged
+export_size: 5
+export_device: cpu
+export_legacy_format: false

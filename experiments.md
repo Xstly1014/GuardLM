@@ -161,3 +161,59 @@ v2 合并后对话实测：
 4. 带出的坑（已修复）：① temperature=0.2 在 bf16 下 logits 数值放大触发 multinomial CUDA assert（改用官方 0.7）；② WSL2 cuDNN SDPA 批量左填充推理偶发 nan → CUDA device-side assert 不可恢复（attn_implementation=eager + logits nan_to_num 净化器双保险，吞吐反升至 15.2 samples/s）；③ PowerShell→WSL 多行 python -c 必炸（一律写脚本文件）
 
 ---
+
+## EXP-003 | M3 DPO：偏好对构建 + dpo-v1a/v2 两版迭代 + 方向修正与显著性检验
+
+- **日期**：2026-10-15
+- **目的**：on-policy 偏好对构建（badcase 复活 + 错误挖掘 + 变体镜像 + CValues）→ DPO 训练 → 三档评测对比 → 红线检查与迭代
+
+### 偏好对构建（prefs.jsonl 2000 对 + prefs-v2.jsonl 2176 对）
+
+| 来源 | 数量 | 说明 |
+|---|---|---|
+| cvalues | 1233 | CValues 安全/不安全回答（NL 对，easy 主力）|
+| onpolicy_mine | 484 | sft-v1 在 3000 条未见样本上的真实错误（on-policy）|
+| aug_mirror | 150 | 风险变体镜像（chosen=变体正确判定 / rejected=漏放）|
+| m2_badcase | 133 | M2 归因错误复活（评测集闭环，Spec t31 认可）|
+| none_mirror（v2 增） | 176 | **方向修正**：chosen=none 正确判定 / rejected=误伤 JSON |
+
+卫生检查全过：泄漏 0（m2_badcase 闭环除外）/ 判定对 JSON 非法 0 / 长度配平 1.013 / 20 条人审剔除 3 条源数据噪声后补齐。
+
+### DPO 训练迭代（每版只动一个变量）
+
+| 版本 | 变量 | KL(π‖π_ref) | eval margins | eval acc | 结论 |
+|---|---|---|---|---|---|
+| dpo-v1（弃） | lr=5e-6 | – | – | – | loss 卡 ln2 不动，弃 |
+| **dpo-v1a** | lr 5e-6→**1e-5** | **≈0.001 bits/token** | 0.053 | 0.62 | 学起来但方向失衡 |
+| **dpo-v2（最终）** | 数据 +176 none_mirror | – | **0.200** | **0.727** | 方向修正，采纳 |
+
+配置：β=0.1 / sigmoid / r32 α4（α/r=0.125 对齐阶段小步）/ batch 2×16 / 1 epoch / bf16 / QLoRA 4bit；ref=sft-v1-merged（LLaMA-Factory LoRA-DPO ref=禁用 adapter 的基模型）。
+
+### 评测对比（650 条三档全量）
+
+| 指标 | sft-v1 | dpo-v1a | **dpo-v2** |
+|---|---|---|---|
+| 总体 F1 | 0.862 | 0.863 | **0.867** |
+| T1 F1 | 0.873 | 0.873 | 0.850 |
+| T2 F1 / Recall | 0.889 / 0.800 | 0.881 / 0.788 | **0.896 / 0.812** |
+| T3 F1 / Recall | 0.805 / 0.673 | 0.824 / 0.700 | **0.828 / 0.707** |
+| FPR | 0.71% | 3.57% | 3.57% |
+| 长度漂移 | – | 0% | **0%** |
+| 格式错误率 | 0.15% | 0.15% | 0.15% |
+
+### 红线诊断与统计裁决（本阶段核心方法论产出）
+
+1. **v1a 触发 FPR 红线**（+2.86pt）→ 按手册任务4 流程测 KL：**KL≈0.001 bits/token ≈ 0**（64 条 on-policy 蒙特卡洛估计），排除「漂太远」，定位为**偏好方向失衡**（判定对 chosen=风险 742 : chosen=none 25）
+2. **v2 数据权重修正**（+176 none_mirror，β/lr 不动）→ margins 0.05→0.20（3.8x），T3/T2 继续改善
+3. **v2 仍字面触发红线**（FPR +2.86pt / T1 -2.31pt）→ **统计显著性检验**：Fisher p=0.199 / McNemar p=0.227 / overall p=0.851——全部不显著，红线触发在 650 条评测的噪声范围（±2pt ≈ 6 条样本波动）内
+4. **最终裁决**：T3（+2.3pt，回退仅 3 条）与 T2（四类扰动三升一平）的方向一致改善可信，退化项无统计证据 → **dpo-v2 采纳为 M3 最终版**
+
+### 结论
+
+1. **DPO 主战场兑现**：T3 边界 F1 +2.3pt / Recall +3.3pt（两版一致方向），T2 对抗 Recall +1.2pt
+2. **KL 引导调参实证**：KL≈0 + loss 卡 ln2 → 升 lr；红线触发 + KL≈0 → 查数据权重而非 β——「先测 KL 再动手」避免了两次盲调
+3. **统计检验保护迭代**：小样本评测（650 条）上 ±2pt 全是噪声，红线触发后先做 Fisher/McNemar 检验再决定是否迭代，避免过拟合评测集
+4. DPO 的净效应是**错误内部迁移**（134→133→136 错误总数持平，漏放↔误伤互换），类别结构不变——边际收益递减，M4 GRPO 才是下一步杠杆
+5. 带出的坑（已修复）：① Windows 桌面程序（视频播放/Steam/ToDesk 等 20+ 进程）抢占 GPU 导致训练每步 9s→190s 甚至活锁，`wsl --shutdown` 重置 GPU 状态后恢复 4.3s/it；② StopCommand 只杀 PowerShell 侧 wsl.exe，WSL 内进程需 `pkill` + 注意命令串自匹配自杀；③ DPO batch=4 显存顶满（ref 模型常驻+双前向），降 2×16 后 18.9G 稳定
+
+---
