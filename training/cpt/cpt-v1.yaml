@@ -1,0 +1,50 @@
+# GuardLM M5: CPT 持续预训练 (cpt-v1)
+# 语料: data/cpt/cpt_corpus.jsonl (领域:通用=7:3, 含黑话造句, eval 文本已排除)
+# 用法 (WSL venv):
+#   llamafactory-cli train /mnt/e/workspace_work/GuardLM/training/cpt/cpt-v1.yaml
+# 超参依据: M5 手册任务2 防遗忘四重保险
+#   lr 5e-6 压着训 / warmup 0.2 长起步 / replay 30% 混入 / LoRA 低干扰
+#   r32: CPT 学分布而非任务, 容量略大于 SFT 的 16; cutoff 512 纯文本块
+
+### model
+model_name_or_path: /root/models/Qwen3-1.7B
+trust_remote_code: true
+
+### method
+stage: pt
+do_train: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 32
+lora_alpha: 64
+lora_dropout: 0.05
+quantization_bit: 4      # QLoRA 开关（漏掉即成普通 LoRA，M0 教训）
+
+### dataset
+dataset: guardlm_cpt
+dataset_dir: /root/LLaMA-Factory/data
+cutoff_len: 512
+preprocessing_num_workers: 8
+overwrite_cache: true
+
+### train
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 4   # 等效 batch 32
+learning_rate: 5.0e-6            # 压着训（1e-5 以下）
+num_train_epochs: 2.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.2                # 分布切换期最危险，长起步
+bf16: true
+gradient_checkpointing: true
+max_grad_norm: 1.0
+
+### eval + output
+val_size: 0.02
+per_device_eval_batch_size: 8
+eval_strategy: steps
+eval_steps: 200
+output_dir: /root/saves/Qwen3-1.7B/guardlm-cpt-v1
+logging_steps: 10
+save_steps: 500
+plot_loss: true
+report_to: tensorboard

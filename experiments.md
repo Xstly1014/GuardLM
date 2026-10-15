@@ -274,3 +274,52 @@ v2 合并后对话实测：
 5. 带出的坑（已修复）：① trl 0.9.6 无 GRPOTrainer，升 1.14 会拉 transformers 5.x 与 torch 2.5 冲突 → 锚定 **trl 0.21 + transformers 4.56.1** 兼容组合；② TRL+peft 下 gradient_checkpointing 生成走 no-cache → logits nan（CUDA assert），patch `model.generate` 在生成期切 eval+cache+禁 ckpt、结束恢复训练态彻底解决；③ Dataset 列经 TRL 透传进奖励函数会被 json 序列化为字符串，奖励函数内需 `_maybe_json` 统一反序列化；④ transformers 4.56 中 `is_gradient_checkpointing` 是属性不是方法（API 变更）
 
 ---
+
+## EXP-005 | M5 CPT 消融：领域持续预训练 → 两阶段对比（cpt-v1 / sft-v2）
+
+- **日期**：2026-10-15
+- **目的**：验证「CPT 灌领域语感 → SFT 教任务行为」两阶段路线对黑话泛化（elicitation）的增益，控制变量消融
+- **设计**：sft-v1（直接 SFT）vs sft-v2（CPT→SFT），同一份数据同一套超参，唯一差异是模型起点
+- **环境变更**：transformers 4.56.1 → **4.52.4**（llamafactory 0.9.3 官方支持范围，M4 的 GRPO 依赖 4.56——若需复跑 GRPO 需升回；trl 0.21 的 `logprobs_from_logits` 缺失以 core.py 尾部 shim 补齐，PPO import 链存活）
+
+### 语料构建（M5-1）
+
+- 四来源 118,556 篇（领域 110,894 + 通用 replay 7,662，7:3 字符配比）：
+  违规案例 109,642（dedup input + COLD 全量）+ 黑话造句 1,247 + 法规摘录 5 + CValues 正例 replay
+- **泄漏防线**：eval 全量文本（含 T2 母本）从语料排除——CPT 语料污染评测是消融实验最常见的自欺
+- **黑话变体坑**：基座对 homophone 变体词按字面造句语境错位 → 丢弃直接变体造句，改原词自然句同位替换（m5_slang_fix.py）
+- **探针集隔离**：20 个留出词（insult/porn/ads/illegal 各 5）不参与造句，度量泛化而非记忆
+
+### 训练（防遗忘四重保险）
+
+| 阶段 | 配置 | 耗时 | 结果 |
+|---|---|---|---|
+| cpt-v1 | stage:pt / LoRA r32α64 / lr 5e-6 / warmup 0.2 / replay 30% / cutoff 512 / 2ep | 20min46s（498 步） | train_loss 3.486 / eval_loss 3.303（PPL 27.2） |
+| sft-v2 | 与 sft-v1 超参严格一致（r16α32 / lr 1e-4 / 3ep / cutoff 256） | 12min（1,083 步） | eval_loss 0.0055（sft-v1 为 0.0056，任务收敛同水位） |
+
+- loss 4.19→3.44 稳定下降，grad_norm 3.7→0.41 无尖刺；通用探针（闲聊/常识/数学）三个检查点全过，**防遗忘零损失**
+
+### 评测（核心结果）
+
+| 指标 | sft-v1 | sft-v2 (CPT) | Δ |
+|---|---|---|---|
+| **P5 黑话 F1（核心）** | 0.8235 | **0.9474** | **+12.4pt** |
+| P5 精确匹配 | 60% | 85% | +25pt |
+| 总体 F1 | 0.8619 | **0.8978** | +3.6pt |
+| T2 对抗 Recall | 0.800 | **0.868** | +6.8pt（pinyin +15.4pt 最大） |
+| T3 边界 F1 | 0.805 | **0.8636** | +5.9pt |
+| **FPR 误伤** | **0.71%** | **9.29%** | **+8.6pt ⚠️** |
+
+- P5 翻转 5/20 全部正翻（ads×4: 刷单/囤货/收徒/清仓，porn×1: 出台）——探针词未进语料，是 10.9 万篇主料的整体语感起效
+- 误伤 13 条归因：~6 标注灰区 + ~5 真实误伤（吐槽/叙事被判风险）+ ~2 SP 安全问询
+- **根因**：CPT 语料 70% 风险文本 → 风险先验回归（M1 探针发现基座 86-96% 判风险偏置，SFT 1:3 配比纠正，CPT 部分逆转）——「漏放↔误伤」跷跷板在预训练侧的再现
+
+### 结论
+
+1. **CPT 消融假设验证成功**：未见黑话 F1 +12.4pt、T2 R +6.8pt、总体 F1 +3.6pt，elicitation 效应显著且可度量（留出探针集设计）
+2. **代价明确不免费**：FPR +8.6pt；M5 为消融实验，**生产线不切换**（grpo-v1 仍为线上版本）
+3. **纳入主线的对冲方案**（二选一）：replay 配比 7:3→6:4 稀释风险先验；或 CPT 语料追加 none 反例（正常吐槽/叙事文本）
+4. 带出的坑：① llamafactory 0.9.3 与 transformers 4.56 双重不兼容（ParallelismConfig 类型解析 + trl import），降级 4.52.4 一劳永逸；② `| tee` 管道下 stdout 块缓冲导致训练 log 不落盘（tqdm 走 stderr 实时），健康监控改读 TensorBoard events 文件；③ WSL2 下 export 偶发 I/O 挂起（进程卡死且 /proc 遍历跟随挂起），重跑即恢复
+
+---
+

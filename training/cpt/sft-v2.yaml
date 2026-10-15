@@ -1,0 +1,51 @@
+# GuardLM M5: SFT on cpt-v1 起点 (sft-v2)——两阶段对比实验
+# 超参与 sft-v1.yaml 严格一致（控制变量），仅模型起点不同:
+#   sft-v1: 基座 Qwen3-1.7B → SFT
+#   sft-v2: 基座 → CPT(安全语料) → SFT
+# 数据: data/sft/train.jsonl (与 M2 完全同一份)
+# 用法 (WSL venv):
+#   llamafactory-cli train /mnt/e/workspace_work/GuardLM/training/cpt/sft-v2.yaml
+
+### model
+model_name_or_path: /root/saves/Qwen3-1.7B/guardlm-cpt-v1-merged
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+quantization_bit: 4      # QLoRA 开关: 4bit NF4 基座, 权重显存 3.4G -> ~1G
+
+### dataset
+dataset: guardlm_sft
+dataset_dir: /root/LLaMA-Factory/data
+template: qwen3          # M0 结论: 模板选错 loss 不降
+cutoff_len: 256
+preprocessing_num_workers: 8
+overwrite_cache: true
+
+### train
+per_device_train_batch_size: 16
+gradient_accumulation_steps: 2   # 等效 batch 32
+learning_rate: 1.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+gradient_checkpointing: true
+max_grad_norm: 1.0
+
+### eval + output
+val_size: 0.05
+per_device_eval_batch_size: 16
+eval_strategy: steps
+eval_steps: 100
+output_dir: /root/saves/Qwen3-1.7B/guardlm-sft-v2
+logging_steps: 10
+save_steps: 100
+plot_loss: true
+report_to: tensorboard

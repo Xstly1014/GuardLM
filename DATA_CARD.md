@@ -137,6 +137,22 @@ Safety-Prompts 的类型是"安全议题域"而非"违规判定"，三类为混�
 4. **CValues prompt 去重**：同一 prompt 的多组偏好对只保留首组（38,689 组），多偏好对的边际价值低但未做消融
 5. **合成腔调偏差**：合成样本由单一模型生成，可能与真实 UGC 分布存在风格偏差；T3 结论外推真实线上数据时需谨慎（T3 测的是"边界识别能力"而非线上真实 FPR）
 6. **谐音表人工构建**：68 对为主流变体，长尾（如多音字变形、方言谐音）未覆盖
+7. **CPT replay 近似**（M5）：通用语料用 CValues 正例近似（理想为 CLUE 级通用语料）；CPT 语料 70% 风险文本导致 sft-v2 FPR 0.71%→9.29%，纳入主线前需调 6:4 配比或追加 none 反例
+
+## 10. M5 CPT 语料（cpt_corpus.jsonl）
+
+- **用途**：领域持续预训练（stage:pt），非指令数据，纯文本语言建模
+- **规模**：118,556 篇 / 约 19MB 文本（领域 13.43MB + 通用 replay 5.76MB）
+- **构成**（领域:通用 = 7:3）：
+  | 来源 | 条数 | 说明 |
+  |---|---|---|
+  | 违规案例 input | 109,642 | dedup.unified.jsonl + COLD 全量 train/dev/test，去 QA 残留/超长 |
+  | 黑话造句 | 1,247 | 基座造句 + 抽检修正（变体词同位替换，`m5_gen_slang.py` + `m5_slang_fix.py`） |
+  | 法规摘录 | 5 | 《网络信息内容生态治理规定》《网络安全法》核心条款 |
+  | CValues replay | 7,662 | 正例文本做通用语料 replay（防遗忘） |
+- **泄漏防线**：eval 全量文本（含 T2 母本）已排除；20 个留出黑话词不参与造句（探针集隔离）
+- **产物**：`data/cpt/cpt_corpus.jsonl` / 统计 `data/cpt/corpus_stats.json` / 探针集 `data/eval/probe_slang.jsonl`（20 条）
+- **关键报告**：`reports/m5_compare.md`（sft-v1 vs sft-v2 消融对比）
 
 ---
 
