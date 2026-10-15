@@ -3,6 +3,16 @@ saves/
 logs/
 *.log
 
+# Data files (raw datasets & generated artifacts, never in repo)
+data/raw/*
+data/interim/*
+data/sft/*
+data/rl/*
+data/eval/*
+data/cpt/*
+!data/*/
+!data/*/.gitkeep
+
 # Personal files (never push)
 *.pdf
 
@@ -15,6 +25,9 @@ docs/
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Secrets (API keys, never push)
+configs/*.env
 
 # OS
 Thumbs.db

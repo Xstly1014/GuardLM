@@ -1,0 +1,70 @@
+# M1-T3 合成场景矩阵：平台 × 类型 × 口吻 强制多样性
+# 分布说明: 边界类（sarcasm/insinuation/signal/softad/softporn）进 T3 候选池，
+#           定向补充类（porn_direct/ads_direct）弥补公开源稀缺（porn=34/ads=25）。
+# target_per_cell: 每格目标生成条数
+
+prompt_version: v1
+scenes:
+
+  # ===== 边界四类（T3 主力） =====
+  - {platform: comment,    type: sarcasm,    tone: colloquial, target: 25}
+  - {platform: comment,    type: sarcasm,    tone: literary,   target: 15}
+  - {platform: danmaku,    type: sarcasm,    tone: colloquial, target: 15}
+  - {platform: dm,         type: sarcasm,    tone: colloquial, target: 15}
+
+  - {platform: comment,    type: insinuation, tone: colloquial, target: 25}
+  - {platform: comment,    type: insinuation, tone: literary,   target: 15}
+  - {platform: dm,         type: insinuation, tone: colloquial, target: 15}
+
+  - {platform: comment,    type: signal,     tone: colloquial, target: 20}
+  - {platform: dm,         type: signal,     tone: colloquial, target: 25}
+  - {platform: danmaku,    type: signal,     tone: colloquial, target: 15}
+
+  - {platform: comment,    type: softad,     tone: colloquial, target: 25}
+  - {platform: dm,         type: softad,     tone: colloquial, target: 20}
+  - {platform: danmaku,    type: softad,     tone: colloquial, target: 15}
+
+  # ===== 软色情边界（T3） =====
+  - {platform: dm,         type: softporn,   tone: colloquial, target: 30}
+  - {platform: comment,    type: softporn,   tone: colloquial, target: 20}
+
+  # ===== 定向补充：porn/ads 明显类（训练池补量） =====
+  - {platform: dm,         type: porn_direct, tone: colloquial, target: 60}
+  - {platform: comment,    type: porn_direct, tone: colloquial, target: 40}
+  - {platform: dm,         type: ads_direct,  tone: colloquial, target: 50}
+  - {platform: comment,    type: ads_direct,  tone: colloquial, target: 30}
+  - {platform: danmaku,    type: ads_direct,  tone: colloquial, target: 20}
+
+# 类型定义（写进 prompt 的生成要求）
+type_defs:
+  sarcasm: "阴阳怪气：不带脏字但明褒实贬的讽刺，如'某些人可真是高贵呢'"
+  insinuation: "影射：用典故/缩写/春秋笔法指桑骂槐，不明说但知情者能懂，如'他那种人什么底细大家心里没数吗'"
+  signal: "暗号导流：用黑产暗语暗示可提供违规服务/资源，如'蓝色晚上八点老地方''有资源私我懂的来'"
+  softad: "软广软文：伪装成真实用户分享的广告，如'这家店真的绝了，我一个月瘦了三十斤'"
+  softporn: "软色情：擦边但不露骨的性暗示文本，如'哥哥想看照片吗，私发你哦'"
+  porn_direct: "明显色情导流：色情服务招揽/约炮导流（不含露骨描写，到'暗示性招揽'为止）"
+  ads_direct: "明显广告导流：加微信/兼职刷单/低俗引流广告"
+
+# few-shot 黄金样例（合成质量对示例敏感度远高于措辞）
+few_shots:
+  sarcasm:
+    - "就您这水平还能拿奖学金，学校是不挑人了呢"
+    - "哇好厉害哦，第一次见到有人把伸手要东西说得这么清新脱俗的"
+  insinuation:
+    - "有些人表面光鲜，背地里什么德行，懂的都懂"
+    - "他那种人什么底细，大家心里没数吗"
+  signal:
+    - "有需要资源的私我，懂的来"
+    - "蓝色晚上八点，老地方，带够"
+  softad:
+    - "姐妹们我真的哭死，用了一个月白了三个度，链接放这了不信自己试"
+    - "上个月靠这个兼职赚了八千多，想了解的私我，名额有限"
+  softporn:
+    - "哥哥一个人在家吗，好无聊哦，想看照片私发你"
+    - "深夜睡不着，有没有哥哥陪我聊聊天呀"
+  porn_direct:
+    - "本地小姐姐上门服务，加薇信 xxx 详聊"
+    - "约吗？包夜可优惠，加我看照片"
+  ads_direct:
+    - "兼职打字员日结三百，在家就能做，加微信 xxxxx 报名"
+    - "低价出各种资源，懂的私聊，先到先得"
