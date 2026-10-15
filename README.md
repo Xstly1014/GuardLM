@@ -14,7 +14,7 @@ GuardLM ingests one Chinese text (comment, danmaku, or message) and emits a stru
 
 Labels: `porn` | `insult` | `ads` | `illegal` | `none`.
 
-The repository covers the complete production path of a content-moderation model: a rule-based adversarial data engine, three-stage alignment training (SFT → DPO → GRPO), a three-tier benchmark harness, and quantized serving.
+The repository covers the complete production path of a content-moderation model: a rule-based adversarial data engine, three-stage alignment training (SFT → DPO → GRPO), a three-tier benchmark harness, and serving with constrained decoding.
 
 ## Features
 
@@ -22,7 +22,7 @@ The repository covers the complete production path of a content-moderation model
 - **Adversarial data engine** — deterministic, parameterized augmentation (variant rewrite, character splitting, homophone substitution) generates attack surfaces beyond public datasets.
 - **Three-tier benchmark** — T1 (conventional), T2 (adversarial), T3 (boundary) are dataset-isolated to prevent leakage; a unified harness produces per-tier Markdown reports.
 - **Full alignment stack on one GPU** — QLoRA-based SFT/DPO/GRPO for Qwen3-1.7B fits in 24 GB VRAM; the validated pipeline runs at ~4.8 samples/s on an RTX 4090.
-- **Quantized deployment** — AWQ 4-bit weights served via vLLM, with a load-test suite to measure throughput and latency.
+- **Serving with constrained decoding** — vLLM serving with JSON-schema constrained output (0.00% format errors), a FastAPI demo with fail-closed error handling, and an AWQ 4-bit option with measured accuracy trade-offs.
 
 ## Training Pipeline
 
@@ -49,10 +49,10 @@ Benchmark (T1/T2/T3) + Harness reports ──► vLLM + AWQ serving
 
 ```
 data/            raw / interim / sft / rl / cpt / eval — dataset pipeline stages
-scripts/         environment setup, training, and verification scripts
+scripts/         environment setup, training, serving, and verification scripts
 training/        per-stage configs and launchers (cpt / sft / dpo / grpo)
 harness/         evaluation pipeline (python -m harness.run)
-serving/         vLLM deployment, quantization, API demo
+demo/            FastAPI wrapper + web demo page for the vLLM backend
 bench/           load-test scripts
 configs/         synthesis scenario matrices
 review/          human-review worksheets archive
@@ -88,16 +88,59 @@ python scripts/m0-8-chat-verify.py
 
 Environment setup scripts (WSL2 provisioning, offline PyTorch install, LLaMA-Factory dependency installation) are under `scripts/` with the `m0-` prefix. Full experiment records, including troubleshooting notes for WSL2/CUDA interop, are in [experiments.md](experiments.md).
 
+## Deployment
+
+The validated production form is the bf16 model (`guardlm-final`) served by vLLM with JSON-schema constrained decoding, which pins the format error rate at 0.00%.
+
+### Start the inference server
+
+```bash
+# bf16 (recommended, zero accuracy loss vs. training time)
+bash scripts/m6-2-serve.sh
+
+# AWQ 4-bit (low-VRAM option, see trade-off table below)
+bash scripts/m6-2-serve.sh guardlm /root/models/guardlm-awq
+```
+
+Prefix caching is disabled by default to keep benchmark numbers honest.
+
+### Run the demo API
+
+```bash
+uvicorn demo.app:app --host 0.0.0.0 --port 7860
+```
+
+The demo wraps the vLLM backend with constrained decoding plus layered parse fallback, and follows a **fail-closed** discipline: when the inference backend is unreachable or a verdict cannot be parsed, it returns an explicit 502 instead of a fabricated verdict.
+
+### Measured capacity (RTX 4090, single GPU, bf16)
+
+| Concurrency | Throughput | P99 E2E latency | TTFT P99 |
+|---|---|---|---|
+| 1 | 28.2 req/s | 35 ms | 27 ms |
+| 4 | 49.5 req/s | 81 ms | 45 ms |
+| 16 | 62.3 req/s | 266 ms | 74 ms |
+
+### Quantization trade-off (650-sample benchmark)
+
+| Deployment | F1 | Recall | FPR | Weight size | Eval time |
+|---|---|---|---|---|---|
+| HF transformers (bf16) | 0.8740 | 0.7824 | 2.86% | 3.3 GiB | ~4.5 min |
+| vLLM (bf16) | **0.8755** | 0.7863 | 3.57% | 3.3 GiB | 183 s |
+| vLLM (AWQ 4-bit) | 0.8274 | 0.7098 | **2.14%** | **1.3 GiB** | **69 s** |
+
+vLLM bf16 is the recommended form: zero accuracy loss against the training-time baseline plus ~2.4x batch throughput. AWQ 4-bit costs 4.8-pt F1, concentrated in recall on adversarial homophone/split variants, in exchange for 61% smaller weights and 2.6x faster batch inference — keep it for ≤ 8 GB VRAM deployments or offline bulk pre-screening, not as the primary serving path.
+
 ## Roadmap
 
 | Stage | Scope | Status |
 |---|---|---|
 | Environment & pipeline validation | WSL2 + CUDA + LLaMA-Factory, QLoRA SFT closed loop | Done |
-| Data engine | COLD/CValues/Safety-Prompts ingestion, adversarial augmentation, benchmark sets | In progress |
-| SFT | Classification instruction tuning, sft-v1 | Planned |
-| DPO / GRPO | Preference optimization, outcome-rewarded exploration | Planned |
-| Benchmark & harness | T1/T2/T3 evaluation, per-version reports | Planned |
-| Serving | vLLM + AWQ 4-bit, load tests, API demo | Planned |
+| Data engine | COLD/CValues/Safety-Prompts ingestion, adversarial augmentation, LLM synthesis, benchmark sets | Done |
+| SFT | Classification instruction tuning (sft-v1, F1 0.862) | Done |
+| DPO / GRPO | Preference optimization + outcome-rewarded RL (dpo-v2, grpo-v1, F1 0.874) | Done |
+| CPT ablation | Domain continued pre-training vs. direct SFT (sft-v2) | Done (ablation; production keeps grpo-v1) |
+| Benchmark & harness | T1/T2/T3 evaluation, per-version reports | Done |
+| Serving | vLLM bf16 + constrained decoding, load tests, demo API, AWQ trade-off | Done |
 
 ## Acknowledgements
 

@@ -323,3 +323,50 @@ v2 合并后对话实测：
 
 ---
 
+## EXP-006 | M6 生产化：vLLM 部署 + 约束解码 + 压测 + AWQ 量化掉点对比
+
+- **日期**：2026-10-16
+- **目的**：训练态模型（grpo-v1）无损落到服务态——合并导出、vLLM 服务化、约束解码、容量压测、演示页、4bit 量化边界摸底
+- **环境变更**：serve-venv（/root/serve-venv）：vLLM 0.12.0 / transformers 4.57 / autoawq 0.2.9（量化时打两处 shim）
+
+### 合并与服务化（M6-1/2）
+
+- grpo-v1 LoRA 合并导出 guardlm-final：50 条抽样 48 条判定一致（2 条采样随机），650 条全量指标与训练态持平——**合并零损耗**
+- vLLM bf16 + `response_format=json_schema`（XGrammar）约束解码常开：格式错误率 0.2% → **0.00%**；reasoning tax 实测 F1 -0.17pt（噪声内），压测确认零性能税（structured ON/OFF 吞吐一致）
+- 压测纪律：`--no-enable-prefix-caching` 防重测虚高；in-flight 并发模型（稳态在途请求数）而非连接数
+
+### 容量压测（M6-3）
+
+| 并发（in-flight） | 吞吐 req/s | tok/s | P99 E2E | TTFT P99 |
+|---|---|---|---|---|
+| 1 | 28.2 | 646 | 35ms | 27ms |
+| 4 | 49.5 | 1,190 | 81ms | 45ms |
+| 16（稳态容量） | **62.3** | **1,527** | 266ms | 74ms |
+
+- **宿主 GPU 干扰事故**：conc=16/64 出现周期性全局停摆（30-80s），四证据链（引擎日志 Running:64 reqs / generation 0.0 tok/s、Windows 侧 GPU 100% util 零吞吐、20+ 宿主 GPU 进程、干净窗口复测不复现）归因为 WSL2 共享 GPU 给 Windows 图形栈的让位行为，与 GuardLM 服务栈无关——`reports/bench.md`
+
+### 演示服务（M6-4）
+
+- FastAPI（:7860）+ 静态页三示例冒烟通过（常规/黑话变体/边界）；**fail-closed 纪律**：后端不可达/解析失败显式 502，绝不输出臆造判定；VLLMBackend 与 HFBackend 交叉验证留痕
+
+### AWQ 量化对比（M6-5）
+
+| 部署形态 | 精度 | 总体 F1 | Recall | FPR | T2 R | T3 F1 | 650 条耗时 | 体积 |
+|---|---|---|---|---|---|---|---|---|
+| HF transformers（grpo-v1） | bf16 | 0.8740 | 0.7824 | 2.86% | 0.828 | 0.8189 | ~4.5min | 3.3G |
+| vLLM bf16（guardlm-final） | bf16 | **0.8755** | 0.7863 | 3.57% | 0.820 | 0.8281 | 183s | 3.3G |
+| vLLM AWQ（guardlm-awq） | 4bit | 0.8274 | 0.7098 | **2.14%** | 0.748 | 0.7603 | **69s** | **1.3G** |
+
+- **vLLM bf16 部署零精度损耗**（+0.15pt 噪声内）+ 吞吐 2.4x——生产线定形态
+- **AWQ 掉点 -4.81pt 不上线**：伤害集中 Recall -7.65pt（FN 109→148，漏放换误伤），T2 扰动归因 homophone **-18.2pt** / split -10.0pt / sp_attack -9.1pt——谐音/拆字判别最先被 4bit 权重噪声破坏；1.7B 小模型权重冗余不足，AWQ 的 1% 显著权重保护不覆盖本任务判别敏感区
+- guardlm-awq 降级为低显存（≤8G）/高吞吐离线初筛备选；后续压缩优先 INT8 > 4bit QAT > AWQ——`reports/m6_serving.md`
+
+### 结论
+
+1. **M6 全链路收官**：训练态 → 服务态零损耗迁移验证完毕，bf16 vLLM 为生产形态，容量基线 62 req/s@P99 266ms，格式错误率 0.00%，fail-closed 纪律贯穿
+2. **量化边界摸清**：AWQ 4bit 对 1.7B 内容安全模型不可用（Recall -7.65pt），量化路线图的降级门槛由此确立
+3. 带出的坑：① autoawq 0.2.9 × transformers 4.57 两处兼容断点（scale.py GELU 类移除、quantizer.py Catcher 属性代理缺失），`scripts/m6_patch_awq.py` 双 shim 修复，语义不变；② **WSL2 GPU 状态残留活锁**：上一个 GPU 进程被强杀后立即重启 vLLM → 引擎 100% CPU 挂起/NCCL 初始化超时，GPU 冷启动后完全正常——重启 vLLM 前确认旧引擎退出干净（setsid 启动 + pkill 后冷却等待）；③ 隔离测试纪律：单请求超时阈值须 >80s（宿主干扰停摆窗口上限），否则误判为引擎挂起
+
+---
+
+

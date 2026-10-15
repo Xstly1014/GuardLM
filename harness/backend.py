@@ -1,6 +1,22 @@
 # -*- coding: utf-8 -*-
-"""推理后端：TransformersBackend（M2），统一 infer(texts) 接口，M6 换 VLLMBackend。"""
+"""推理后端：TransformersBackend（M2）+ VLLMBackend（M6），统一 infer() 接口。
+
+VLLMBackend 走 OpenAI 兼容接口，约束解码 schema 直接由 PredSchema 生成——
+同一份契约驱动训练（to_sft）/ 评测（parse）/ 服务（response_format）三层。
+"""
 import os
+import time
+
+
+def verdict_response_format():
+    """从 PredSchema 生成 vLLM OpenAI 兼容 response_format（json_schema）。"""
+    from .parse import PredSchema
+    schema = PredSchema.model_json_schema()
+    schema.pop("title", None)
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": "verdict", "schema": schema},
+    }
 
 
 class TransformersBackend:
@@ -99,4 +115,58 @@ class TransformersBackend:
             # 只取新增 token（去掉 prompt 部分）
             new_ids = gen[j][enc["input_ids"].shape[1]:]
             outs.append(self.tokenizer.decode(new_ids, skip_special_tokens=True))
+        return outs
+
+
+class VLLMBackend:
+    """vLLM OpenAI 兼容后端（M6，评测=生产同链路）。
+
+    - 走 /v1/chat/completions；structured=True 时挂 response_format
+      （第 6 层约束解码，schema 由 PredSchema 单一来源生成）
+    - chat_template_kwargs.enable_thinking=False 关思考（与训练侧一致）
+    - 采样参数与 TransformersBackend 对齐：temp 0.7 / top_p 0.8 / top_k 20
+    - 依赖 openai 包（仅在 serve-venv 中执行 vLLM 评测时装载）
+
+    注意 top_k 不是 OpenAI 标准字段，经 extra_body 透传给 vLLM。
+    """
+
+    def __init__(self, model="guardlm", endpoint="http://localhost:8000/v1",
+                 structured=False, api_key="EMPTY", max_retries=2):
+        from openai import OpenAI
+        self.client = OpenAI(base_url=endpoint, api_key=api_key, timeout=120.0)
+        self.model = model
+        self.structured = structured
+        self.max_retries = max_retries
+
+    def infer(self, prompts, max_new_tokens=64, batch_size=16,
+              temperature=0.7, top_p=0.8, top_k=20):
+        """prompts: list[(instruction, text)]；顺序同步返回。单请求重试，失败记空串。"""
+        fmt = verdict_response_format() if self.structured else None
+        outs = []
+        for ins, txt in prompts:
+            body = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": f"{ins}\n{txt}"}],
+                "max_tokens": max_new_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+                "extra_body": {
+                    "top_k": top_k,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+            }
+            if fmt:
+                body["response_format"] = fmt
+            out = ""
+            for attempt in range(self.max_retries + 1):
+                try:
+                    resp = self.client.chat.completions.create(**body)
+                    out = resp.choices[0].message.content or ""
+                    break
+                except Exception as e:  # noqa: BLE001
+                    if attempt == self.max_retries:
+                        print(f"[vllm-backend] 请求失败: {str(e)[:80]} -> 空输出")
+                    else:
+                        time.sleep(1.0)
+            outs.append(out)
         return outs

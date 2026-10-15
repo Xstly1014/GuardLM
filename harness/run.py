@@ -14,7 +14,7 @@ import json
 import os
 import time
 
-from .backend import TransformersBackend
+from .backend import TransformersBackend, VLLMBackend
 from .parse import parse_pred
 from .metrics import compute_metrics
 from .report import render_report, write_report
@@ -24,6 +24,7 @@ EVAL_FILES = {
     "T1": "t1.jsonl",
     "T2": ["t2_variants.jsonl", "t2_sp_attack.jsonl"],
     "T3": "t3.jsonl",
+    "P5": "probe_slang.jsonl",  # M5 黑话探针集（CPT 消融专用，20 条留出词）
 }
 
 
@@ -47,6 +48,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--base", default=None, help="LoRA 基座路径（默认读 adapter_config）")
+    ap.add_argument("--backend", default="transformers",
+                    choices=["transformers", "vllm"],
+                    help="transformers=本地 GPU 加载; vllm=OpenAI 兼容服务")
+    ap.add_argument("--endpoint", default="http://localhost:8000/v1",
+                    help="vLLM 服务地址（--backend vllm 时生效）")
+    ap.add_argument("--structured", action="store_true",
+                    help="vllm 后端开启约束解码 response_format")
     ap.add_argument("--eval", default="data/eval/")
     ap.add_argument("--tier", default="T1,T2,T3")
     ap.add_argument("--no-think", action="store_true", help="instruction 尾部追加 /no_think")
@@ -70,7 +78,11 @@ def main():
             if not r["instruction"].endswith("/no_think"):
                 r["instruction"] = r["instruction"] + " /no_think"
 
-    backend = TransformersBackend(args.model, base_path=args.base)
+    if args.backend == "vllm":
+        backend = VLLMBackend(model=args.model, endpoint=args.endpoint,
+                              structured=args.structured)
+    else:
+        backend = TransformersBackend(args.model, base_path=args.base)
     prompts = [(r["instruction"], r["input"]) for r in data]
 
     t0 = time.time()
@@ -126,7 +138,9 @@ def main():
         "gen_params": (f"max_new_tokens={args.max_new_tokens}, temperature=0.7, "
                        f"top_p=0.8, top_k=20, batch={args.batch_size}, "
                        f"no_think={'on' if args.no_think else 'off'}, "
-                       f"infer={t_infer:.0f}s"),
+                       f"backend={args.backend}"
+                       + (", structured=on" if args.structured else "")
+                       + f", infer={t_infer:.0f}s"),
         "extra": "口径: 解析失败按判 none 计（FN），格式错误率单列",
     }
     report = render_report(meta, metrics, badcases)
