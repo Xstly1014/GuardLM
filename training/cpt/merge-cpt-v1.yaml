@@ -1,0 +1,15 @@
+# GuardLM M5: 合并 cpt-v1 LoRA（sft-v2 的起点模型）
+# 用法 (WSL venv):
+#   llamafactory-cli export /mnt/e/workspace_work/GuardLM/training/cpt/merge-cpt-v1.yaml
+
+### model
+model_name_or_path: /root/models/Qwen3-1.7B
+adapter_name_or_path: /root/saves/Qwen3-1.7B/guardlm-cpt-v1
+trust_remote_code: true
+
+### export
+template: qwen3
+export_dir: /root/saves/Qwen3-1.7B/guardlm-cpt-v1-merged
+export_size: 5
+export_device: cpu
+export_legacy_format: false

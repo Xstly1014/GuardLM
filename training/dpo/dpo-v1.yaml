@@ -1,0 +1,54 @@
+# GuardLM M3: DPO 偏好对齐训练 dpo-v1
+# 数据: data/rl/prefs.jsonl (2000 对: cvalues 1233 + onpolicy_mine 484 + aug_mirror 150 + m2_badcase 133)
+# 用法 (WSL venv):
+#   llamafactory-cli train /mnt/e/workspace_work/GuardLM/training/dpo/dpo-v1.yaml
+# 超参依据: M3 手册任务2 决策表 (火山引擎 DPO 最佳实践对齐):
+#   β=0.1 (0.1-0.5 区间下沿, 变化有节制) / lr 5e-6 (LoRA-DPO 区间上沿, 比 SFT 小两个数量级)
+#   1 epoch 防记忆化 / r32+α4 (α/r=0.125, 对齐阶段小步修正, 远比 SFT 的 α=2r 保守)
+# ref 锚点: model=合并后的 sft-v1, LoRA-DPO 的 ref=禁用 adapter 的基模型 = sft-v1 (LLaMA-Factory 确认)
+
+### model
+model_name_or_path: /root/saves/Qwen3-1.7B/guardlm-sft-v1-merged
+trust_remote_code: true
+
+### method
+stage: dpo
+do_train: true
+pref_beta: 0.1
+pref_loss: sigmoid
+finetuning_type: lora
+lora_target: all
+lora_rank: 32
+lora_alpha: 4
+lora_dropout: 0.05
+quantization_bit: 4      # QLoRA: 4bit NF4 常驻
+
+### dataset
+dataset: guardlm_dpo
+dataset_dir: /root/LLaMA-Factory/data
+template: qwen3
+cutoff_len: 768            # 覆盖 CValues NL 对 (prompt+answer <=600 字符) + 分类对
+preprocessing_num_workers: 8
+overwrite_cache: true
+
+### train
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16  # 等效 batch 32; batch 4 在 24G 卡上顶满显存触发分配器颠簸, 降半重跑
+learning_rate: 5.0e-6
+num_train_epochs: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+gradient_checkpointing: true
+max_grad_norm: 1.0
+
+### eval + output
+val_size: 0.05
+per_device_eval_batch_size: 2
+eval_strategy: steps
+eval_steps: 20
+output_dir: /root/saves/Qwen3-1.7B/guardlm-dpo-v1
+logging_steps: 5
+save_steps: 100
+plot_loss: true
+report_to: tensorboard

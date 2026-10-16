@@ -3,11 +3,26 @@ saves/
 logs/
 *.log
 
+# Data files (raw datasets & generated artifacts, never in repo)
+data/raw/*
+data/interim/*
+data/sft/*
+data/rl/*
+data/eval/*
+data/cpt/*
+!data/*/
+!data/*/.gitkeep
+
 # Personal files (never push)
 *.pdf
+!paper/figures/*.pdf
+!paper/main.pdf
 
 # Internal development docs (kept local, not part of the open-source repo)
 docs/
+
+# Paper tooling (tectonic binary); figures PDFs are re-included below
+paper/tools/
 
 # Tooling
 .trae/
@@ -15,6 +30,9 @@ docs/
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Secrets (API keys, never push)
+configs/*.env
 
 # OS
 Thumbs.db

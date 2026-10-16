@@ -1,0 +1,17 @@
+# GuardLM M6: 合并 grpo-v1 为最终部署权重（全链路终点 sft→dpo→grpo）
+# 链路: Qwen3-1.7B -> sft-v1 -> dpo-v2 -> grpo-v1
+# grpo-v1 的 adapter_config base_model = guardlm-dpo-v2-merged
+# 用法 (WSL venv):
+#   llamafactory-cli export /mnt/e/workspace_work/GuardLM/training/deploy/merge-grpo-final.yaml
+
+### model
+model_name_or_path: /root/saves/Qwen3-1.7B/guardlm-dpo-v2-merged
+adapter_name_or_path: /root/saves/Qwen3-1.7B/guardlm-grpo-v1
+trust_remote_code: true
+
+### export
+template: qwen3
+export_dir: /root/models/guardlm-final
+export_size: 5
+export_device: cpu
+export_legacy_format: false
