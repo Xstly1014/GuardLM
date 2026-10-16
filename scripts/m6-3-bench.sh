@@ -8,16 +8,16 @@ PY=/root/guardlm-venv/bin/python
 
 echo "=== warmup structured ON (grammar compile / cuda graph, excluded from stats) ==="
 $PY bench/press.py --num-prompts 3 --concurrency 1 --rounds 1 --structured \
-  --out /tmp/bench_warmup1.md >/dev/null
+  -o /tmp/bench_warmup1.md >/dev/null
 echo "=== warmup structured OFF ==="
 $PY bench/press.py --num-prompts 3 --concurrency 1 --rounds 1 \
-  --out /tmp/bench_warmup2.md >/dev/null
+  -o /tmp/bench_warmup2.md >/dev/null
 
 echo "=== BENCH: structured ON (production config) ==="
-$PY bench/press.py --structured --rounds 3 --out reports/bench.md
+$PY bench/press.py --structured --rounds 3 -o reports/bench.md
 
 echo "=== BENCH: structured OFF (control) ==="
-$PY bench/press.py --rounds 3 --out reports/bench.md
+$PY bench/press.py --rounds 3 -o reports/bench.md
 
 rm -f /tmp/bench_warmup1.md /tmp/bench_warmup2.md
 echo "ALL_BENCH_DONE"
