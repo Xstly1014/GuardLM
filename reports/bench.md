@@ -58,7 +58,7 @@ structured OFF 对照组：conc=1 轮 1 干净（207ms / 4.7 req/s，与 ON 一�
 
 ```bash
 # 宿主闲置后重跑（已内置错误类型分布 + 原始时序落盘 bench_raw.json）
-wsl bash scripts/m6-3-bench.sh
+wsl bash scripts/m6/m6-3-bench.sh
 ```
 
 - 压测工具：`bench/press.py`（in-flight 并发 / 流式 TTFT / 单调钟计时）

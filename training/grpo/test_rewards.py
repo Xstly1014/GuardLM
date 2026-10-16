@@ -8,7 +8,7 @@
 用法:
   python training/grpo/test_rewards.py                  # 单测
   python training/grpo/test_rewards.py --sanity \
-      --pred reports/dpo-v2.pred.jsonl --tier T2        # 离线 sanity
+      --pred reports/artifacts/dpo-v2.pred.jsonl --tier T2        # 离线 sanity
 """
 import argparse
 import json
@@ -123,7 +123,7 @@ def sanity(pred_path, tier):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sanity", action="store_true")
-    ap.add_argument("--pred", default="reports/dpo-v2.pred.jsonl")
+    ap.add_argument("--pred", default="reports/artifacts/dpo-v2.pred.jsonl")
     ap.add_argument("--tier", default="T2")
     args = ap.parse_args()
 

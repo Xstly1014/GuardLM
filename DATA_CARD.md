@@ -106,7 +106,7 @@ Safety-Prompts 的类型是"安全议题域"而非"违规判定"，三类为混�
 - **用途分配**：150 条进 T3 评测档（boundary_type 留痕），344 条进训练池补 porn/ads 稀缺类
 - **API 留痕**：`data/interim/synth.api_log.jsonl`（55 次调用，延迟中位数 ~20s，峰值 292s）
 - **合规声明**：合成目的为红队防御研究评测集构建；prompt 明确要求"停留在暗示、擦边层面，不生成露骨内容"；全部样本经人工审核后使用
-- 脚本：`scripts/synthesize.py`（生成）/ `scripts/m1-apply-review.py`（人审结论应用）/ `scripts/promote.py`（打标合入）
+- 脚本：`scripts/common/synthesize.py`（生成）/ `scripts/m1/m1-apply-review.py`（人审结论应用）/ `scripts/common/promote.py`（打标合入）
 
 ## 7. 人审记录
 
@@ -122,11 +122,11 @@ Safety-Prompts 的类型是"安全议题域"而非"违规判定"，三类为混�
 
 - **切分顺序**：统一池 → 去重 → **先切 T1/T2 母本/T3** → 再对剩余训练池做增强。评测母本的任何形态（母本本身 + 变体）均不进训练集。
 - **T2 变体**：由 130 条评测母本专属生成（`m1-augment-eval.py`），母本从训练池移除在先。
-- **双重校验**（`scripts/leak_check.py`）：
+- **双重校验**（`scripts/common/leak_check.py`）：
   1. MinHash（Jaccard≥0.6）训练-评测相似对 = 0（通过线，一条不能有）
   2. `origin_id` 关联校验（评测母本的变体若出现在训练侧即泄漏）
 - **校验结果（2026-10-15，合成合入后全链路复检）**：**PASS**（`reports/m1_leak.md`）
-  - 首轮（合成前）校验发现 2 条模板相似对（SP 指令攻击模板共享导致的 MinHash 误报，语义核心不同），已从训练侧移除（`scripts/m1-fix-leak.py`）
+  - 首轮（合成前）校验发现 2 条模板相似对（SP 指令攻击模板共享导致的 MinHash 误报，语义核心不同），已从训练侧移除（`scripts/m1/m1-fix-leak.py`）
   - 复检（合成合入后）：相似对 0 / origin 泄漏 0，训练侧 14,148 文本 vs 评测侧 780 文本（T1 250 + T2 380 + T3 150）
 
 ## 9. 已知局限
@@ -156,6 +156,6 @@ Safety-Prompts 的类型是"安全议题域"而非"违规判定"，三类为混�
 
 ---
 
-*生成脚本全部在 `scripts/` 下可复现：`clean.py`（清洗）→ `m1-ads-mining.py`（ads 判例）→ `m1-merge-pool.py` + `dedup.py`（合并去重）→ `ratio_probe.py`（配比探针）→ `split_eval.py`（切分）→ `augment.py` / `m1-augment-eval.py`（增强）→ `synthesize.py` + `m1-apply-review.py` + `promote.py`（合成/人审/合入）→ `m1_assemble.py`（组装）→ `leak_check.py`（隔离校验）→ 一键重跑：`m1-pipeline.sh`*
+*生成脚本全部在 `scripts/` 下可复现：`common/clean.py`（清洗）→ `m1/m1-ads-mining.py`（ads 判例）→ `m1/m1-merge-pool.py` + `common/dedup.py`（合并去重）→ `common/ratio_probe.py`（配比探针）→ `common/split_eval.py`（切分）→ `common/augment.py` / `m1/m1-augment-eval.py`（增强）→ `common/synthesize.py` + `m1/m1-apply-review.py` + `common/promote.py`（合成/人审/合入）→ `m1/m1_assemble.py`（组装）→ `common/leak_check.py`（隔离校验）→ 一键重跑：`m1/m1-pipeline.sh`*
 
 *关键报告：`reports/m1_stats.md`（分布）/ `m1_dedup.md`（去重）/ `m1_probe.md`（配比探针）/ `m1_leak.md`（隔离校验 PASS）*

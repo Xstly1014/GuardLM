@@ -78,14 +78,14 @@ Three-tier benchmark + harness reports ──► vLLM serving (bf16, constrained
 
 ```
 data/            dataset pipeline stages (raw / interim / sft / rl / cpt / eval)
-scripts/         environment setup, training, serving, benchmark, verification
+scripts/         per-milestone scripts: m0..m6/ (setup, data, training, serving) + common/ (shared)
 training/        per-stage configs and launchers (cpt / sft / dpo / grpo)
 harness/         evaluation pipeline (python -m harness.run)
 demo/            FastAPI wrapper + web demo page for the vLLM backend
 bench/           load-test scripts
 configs/         synthesis scenario matrices
 review/          human-review worksheets archive
-reports/         evaluation reports per model version
+reports/         evaluation reports per model version (raw predictions under artifacts/)
 paper/           ACL-style technical paper (LaTeX source + figures)
 experiments.md   experiment log: config / metrics / conclusion per run
 ```
@@ -107,13 +107,13 @@ A sanity-check script runs QLoRA SFT on the bundled identity dataset and merges 
 
 ```bash
 # 1. QLoRA SFT — 230 steps, ~95 s on RTX 4090
-bash scripts/m0-8-run-sft-v2.sh
+bash scripts/m0/m0-8-run-sft-v2.sh
 
 # 2. Merge LoRA into the base model (dequantized bf16 export)
-bash scripts/m0-8-merge.sh
+bash scripts/m0/m0-8-merge.sh
 
 # 3. Verify the fine-tune via inference
-python scripts/m0-8-chat-verify.py
+python scripts/m0/m0-8-chat-verify.py
 ```
 
 ## Deployment
@@ -122,10 +122,10 @@ The production form is the bf16 model (`guardlm-final`) served by vLLM with JSON
 
 ```bash
 # bf16 (production)
-bash scripts/m6-2-serve.sh
+bash scripts/m6/m6-2-serve.sh
 
 # AWQ 4-bit (low-VRAM option, see trade-off table above)
-bash scripts/m6-2-serve.sh guardlm /root/models/guardlm-awq
+bash scripts/m6/m6-2-serve.sh guardlm /root/models/guardlm-awq
 ```
 
 Prefix caching is disabled by default to keep benchmark numbers reproducible.

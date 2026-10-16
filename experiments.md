@@ -40,7 +40,7 @@ v2 合并后对话实测：
 
 - adapter：`/root/saves/Qwen3-1.7B/qwen3-qlora-sft-m0-v2`（34MB）
 - 合并模型：`/root/models/Qwen3-1.7B-sft-m0-v2-merged`（bf16 全量 3.4GB）
-- 复现脚本：`scripts/m0-run-sft.sh`（v1 配置）、`scripts/m0-8-run-sft-v2.sh`（v2 配置）、`scripts/m0-8-merge.sh`、`scripts/m0-8-chat-verify.py`
+- 复现脚本：`scripts/m0/m0-run-sft.sh`（v1 配置）、`scripts/m0/m0-8-run-sft-v2.sh`（v2 配置）、`scripts/m0/m0-8-merge.sh`、`scripts/m0/m0-8-chat-verify.py`
 
 ### 结论
 
@@ -113,7 +113,7 @@ v2 合并后对话实测：
 - 训练集：`data/sft/train.jsonl`（12,148）/ `data/rl/train_pref.jsonl`（2,000 对）
 - 评测集：`data/eval/t1.jsonl` / `t2_sp_attack.jsonl` / `t2_mothers.jsonl` / `t2_variants.jsonl` / `t3.jsonl`
 - 数据卡：`DATA_CARD.md` v1.0（规则/分布/局限全留痕）
-- 一键重跑：`scripts/m1-pipeline.sh`（人审结论应用 → promote → 合并 → 去重 → 切分 → 增强 → 组装 → 校验）
+- 一键重跑：`scripts/m1/m1-pipeline.sh`（人审结论应用 → promote → 合并 → 去重 → 切分 → 增强 → 组装 → 校验）
 
 ### 结论
 
@@ -365,7 +365,7 @@ v2 合并后对话实测：
 
 1. **M6 全链路收官**：训练态 → 服务态零损耗迁移验证完毕，bf16 vLLM 为生产形态，容量基线 62 req/s@P99 266ms，格式错误率 0.00%，fail-closed 纪律贯穿
 2. **量化边界摸清**：AWQ 4bit 对 1.7B 内容安全模型不可用（Recall -7.65pt），量化路线图的降级门槛由此确立
-3. 带出的坑：① autoawq 0.2.9 × transformers 4.57 两处兼容断点（scale.py GELU 类移除、quantizer.py Catcher 属性代理缺失），`scripts/m6_patch_awq.py` 双 shim 修复，语义不变；② **WSL2 GPU 状态残留活锁**：上一个 GPU 进程被强杀后立即重启 vLLM → 引擎 100% CPU 挂起/NCCL 初始化超时，GPU 冷启动后完全正常——重启 vLLM 前确认旧引擎退出干净（setsid 启动 + pkill 后冷却等待）；③ 隔离测试纪律：单请求超时阈值须 >80s（宿主干扰停摆窗口上限），否则误判为引擎挂起
+3. 带出的坑：① autoawq 0.2.9 × transformers 4.57 两处兼容断点（scale.py GELU 类移除、quantizer.py Catcher 属性代理缺失），`scripts/m6/m6_patch_awq.py` 双 shim 修复，语义不变；② **WSL2 GPU 状态残留活锁**：上一个 GPU 进程被强杀后立即重启 vLLM → 引擎 100% CPU 挂起/NCCL 初始化超时，GPU 冷启动后完全正常——重启 vLLM 前确认旧引擎退出干净（setsid 启动 + pkill 后冷却等待）；③ 隔离测试纪律：单请求超时阈值须 >80s（宿主干扰停摆窗口上限），否则误判为引擎挂起
 
 ---
 
