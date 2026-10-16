@@ -12,6 +12,13 @@
 
 详细报告：① `reports/grpo-v1.md` ② `reports/m6_tax_on.md` ③ `reports/m6_awq.md`
 
+> **格式错误率口径脚注**（详见 `reports/m7_strict_format.md` 离线重算）：① 为 transformers
+> 原生采样（native），②③ 为约束解码 ON。三行 0.0% 与 strict 口径（parse_level ==
+> format_error）离线重算一致。native 形态的真实基线为 0.15%（1/650，sft-v1/dpo-2/
+> m6_tax_off 的 format_error 集中于同一条提示注入样本 `sp:Goal_Hijacking:00514`，
+> 注入话术劫持模型脱离 JSON 契约）；约束解码 ON 后同一样本被 schema 强制拉回合法
+> JSON，0.00%。「0.2% → 0.00%」的精确表述为 0.15% → 0.00%。
+
 ## 2. 结论一：vLLM 部署零精度损耗（② vs ①）
 
 - 总体 F1 +0.15pt（0.8755 vs 0.8740），在 650 条评测的 ±2pt 噪声带内，属采样随机性而非系统差异。
@@ -52,7 +59,7 @@
 
 ## 4. 服务化架构要点（M6-2/3/4 交付物）
 
-- **约束解码常开**：`response_format=json_schema`（XGrammar 后端），格式错误率 0.2% → 0.00%；reasoning tax 实测 F1 -0.17pt（噪声内），确认零性能税（压测 structured ON/OFF 吞吐一致）。
+- **约束解码常开**：`response_format=json_schema`（XGrammar 后端），格式错误率 0.15% → 0.00%（唯一 format_error 样本 `sp:Goal_Hijacking:00514` 提示注入劫持被 schema 强制拉回，离线重算见 `reports/m7_strict_format.md`）；reasoning tax 实测 F1 -0.17pt（噪声内），确认零性能税（压测 structured ON/OFF 吞吐一致）。
 - **fail-closed 纪律**：推理后端不可达返回显式 502，解析失败返回 502 + raw 前缀，绝不输出臆造判定；四层解析容错（严格 JSON → 宽松提取 → 兜底）仅在前端，约束解码失败时后端已保证 schema 合法。
 - **容量基线**（干净窗口稳态，conc=16）：62.3 req/s / 1527 tok/s / P99 E2E 266 ms / TTFT P99 74 ms；详见 `reports/bench.md`。
 - **演示服务**：FastAPI + 静态页（:7860），三示例冒烟通过（常规/黑话/边界各一），后端断连 502 验证通过。

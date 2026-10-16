@@ -86,9 +86,11 @@ v2 合并后对话实测：
 | 三源清洗 | COLD 31,692 / Safety-Prompts 89,997 / CValues 116,536 行 | 统一 alpaca 池（COLD+SP 121,689）+ DPO 偏好对 38,689 |
 | LLM 合成 | gpt-6.1-sol（OpenAI 协议中转），场景矩阵 20 格 + few-shot | 495 条 → 人审 50 条抽样（不合格率 2%）→ 494 条合入 |
 | MinHash 去重 | 合并池 122,183 | 122,150（移除 33 条模糊重复，num_perm=64, J≥0.9） |
-| 三档切分 | dedup 池 122,150 | T1 250 / T2 380（attack 120 + 母本 130 + 变体 130）/ T3 150 + 训练池 121,500 |
+| 三档切分 | dedup 池 122,150 | T1 250 / T2 语料 380（attack 120 + 母本 130 + 变体 130）/ T3 150 + 训练池 121,500 |
 | 对抗增强 | 训练池风险样本 62,174 | 15,627 变体（fan 6,237 / pinyin 1,659 / emoji 1,605 / homophone 1,455 / split 630 + 无害 4,041） |
 | 最终组装 | 探针结论 1:3 | SFT 12,148（risk 2,866 + none 9,000 + aug 282）+ DPO 2,000 对 |
+
+> **口径澄清（EXP-007 验收修复）**：T2 语料 380 条中，130 条母本（t2_mothers.jsonl）刻意**不入评测**——母本先于增强从训练池移除，仅用作泄漏隔离校验对象与变体溯源（`m1-augment-eval.py` 防泄漏铁律）；实际评测基准 = **650 条（T1 250 + T2 250 + T3 150）**，与 README / DATA_CARD / 各报告头一致。
 
 ### 关键实验：配比探针（risk:none = 1:1 / 1:3 / 1:5）
 
@@ -368,5 +370,50 @@ v2 合并后对话实测：
 3. 带出的坑：① autoawq 0.2.9 × transformers 4.57 两处兼容断点（scale.py GELU 类移除、quantizer.py Catcher 属性代理缺失），`scripts/m6/m6_patch_awq.py` 双 shim 修复，语义不变；② **WSL2 GPU 状态残留活锁**：上一个 GPU 进程被强杀后立即重启 vLLM → 引擎 100% CPU 挂起/NCCL 初始化超时，GPU 冷启动后完全正常——重启 vLLM 前确认旧引擎退出干净（setsid 启动 + pkill 后冷却等待）；③ 隔离测试纪律：单请求超时阈值须 >80s（宿主干扰停摆窗口上限），否则误判为引擎挂起
 
 ---
+
+## EXP-007 | GPT 独立验收：全量问题修复 + 评测协议严格化 + 可复现性复核
+
+- **日期**：2026-10-16 深夜 ~ 2026-10-17
+- **目的**：GPT 对项目（代码+文档）做独立验收，输出 P0-P2 问题清单；本条记录全量修复与复核结果。**纪律：验收发现的问题必须逐条裁定真伪、修复、重跑验证，不留「修了但没验证」的尾巴。**
+
+### A 组 | 文档口径修复（P1）
+
+1. **T2 380 vs 250 口径冲突**：切分表写 380（含 130 母本），所有评测用 250——已澄清：130 母本仅作变体溯源/隔离检查，不入评测基准；评测基准恒为 650 = 250+250+150
+2. **DATA_CARD 去重措辞**：「整行 md5」→「md5 对 `input` 文本字段，其余字段不参与」（与代码一致）
+
+### B 组 | 代码修复（P0）+ 重跑验证
+
+1. **B1 provenance 断链（P0，最重要）**：`m1_assemble.py` 输出时丢弃 `id`/`origin_id`，导致 leak_check 的 origin 关联校验**空转恒过**（train_ids 恒空集），隔离校验形同虚设。修复：
+   - assemble 输出保留 `id`/`origin_id`（DPO 偏好对按采样序生成确定性 id `cvalues:pref:xxxxxx`）；重跑验证 **训练内容与 v1 逐条 0 差异**（SFT 12,148 条 / DPO 2,000 对，seed 固定确定性成立）
+   - `leak_check.py` 升级三重校验：MinHash（范围扩至 **DPO prompt/chosen/rejected 全量文本**，18,148 条目）+ origin 关联 + **缺 provenance(id) 判 FAIL**；重跑 **PASS：相似对 0 / origin 泄漏 0 / 缺 id 0**——origin 校验首次真正生效且 0 泄漏，证明切分本身干净，此前的 PASS 是侥幸不是证明
+2. **B2 评测协议 fail-fast**：`harness/run.py` 评测文件缺失从「静默跳过」改为 FileNotFoundError；新增条数断言（T1=250 / T2=250 / T3=150 / P5=20），不符即拒绝出报告——杜绝「650 条变 600 条」级静默口径漂移
+3. **B3 strict 格式口径离线重算**（`reports/m7_strict_format.md`）：全 pred 文件重算 parse_level 分布——①「0.2%」精确为 **0.15%（1/650）**，且 sft-v1/dpo-v2/m6_tax_off/guardlm-final 的 format_error **全部集中于同一条提示注入样本 `sp:Goal_Hijacking:00514`**（注入话术劫持模型脱离 JSON 契约），非随机格式噪声；② 约束解码 ON（m6_tax_on/m6_awq）下该样本 0 次失手——**schema 强制把被注入模型拉回合法 JSON，约束解码的防御价值首次获得逐条实证**；③ repaired 全程 0（json_repair 从未真正介入，契约遵循来自 SFT 而非容错层）
+
+### C 组 | 统计补全 + 可复现性复核
+
+1. **C1 增强命中率**（`reports/m7_aug_stats.md`）：词表定向扰动的能力天花板 = **span 覆盖率 27.3%**（62,174 条风险样本仅 16,995 条可命中）；各模式上限 fan 99.8% > pinyin/emoji 27.3% > homophone 23.3% > split 10.5%；**ads/porn 增强近乎失效（各 38 条 vs insult 6,267）**——从数字上闭环解释了 M1 引入 LLM 合成补量的必要性
+2. **C2 三模型重跑复核**（`reports/m7_eval_recheck.md`）：sft-v1 / dpo-v2 / grpo-v1 以 **seed=2026 固定采样**重跑 650 条——F1 漂移 +1.21 / +0.72 / +0.52pt，**全部在 ±2pt 噪声带内，历史报告数字可复现性确认**；新增 `harness/run.py --seed` 参数（transformers 后端固定采样流）。重跑数字成为新可复现基线：sft-v1 0.8740 / dpo-v2 0.8740 / grpo-v1 0.8792
+
+### C2 复核中的三个过程发现（防再踩）
+
+1. **FPR 小分母噪声**：none 仅 140 条，1 条翻转 = 0.71pt 粒度；FPR 在 0.71%↔3.57% 间跳动属采样波动，非模型行为漂移——引用 FPR 须注明粒度
+2. **sft-v1 与 dpo-v2 重跑 raw 输出 91.4% 逐字节相同**：非加载 bug（三次基座可由加载日志区分：Qwen3-1.7B 分片 vs merged 单文件），真因 = DPO 策略差异本就极小（EXP-003 实测 KL≈0.001 bits/token）+ 固定 seed 采样路径锁死——复现侧再次印证「DPO 是偏好微调而非行为重构」
+3. **混淆矩阵一致 ≠ 预测一致**：recheck sft-v1 混淆矩阵与原 grpo-v1 逐位相同（TP=399 FP=4 FN=111 TN=136），但判定一致率仅 94.9%（33 条分歧恰好错误互换平衡）——复核必须逐条比对 pred，混淆矩阵巧合会误导裁定
+
+### 修复文件清单
+
+- 代码：`scripts/m1/m1_assemble.py`（保留 provenance）、`scripts/common/leak_check.py`（三重校验）、`harness/run.py`（fail-fast + 条数断言 + `--seed`）
+- 文档：`DATA_CARD.md`（去重措辞 + provenance 说明）、`reports/m6_serving.md`（格式错误率口径脚注）、`experiments.md`（T2 口径澄清）
+- 新报告：`reports/m7_strict_format.md`、`reports/m7_aug_stats.md`、`reports/m7_eval_recheck.md`、`reports/m7_recheck/`（三模型重跑 pred+报告）
+- 重跑产物：`data/sft/train.jsonl` + `data/rl/train_pref.jsonl`（+provenance 字段，内容 0 差异）、`reports/m1_leak.md`（三重校验 PASS）
+
+### 结论
+
+1. GPT 验收问题全部关闭：P0 provenance 断链已修复并以「origin 校验真正生效 + 0 泄漏」重新验证；口径类（T2/去重/格式错误率）全部对齐唯一事实源；评测协议 fail-fast 化
+2. 验收反而带来三项增值：提示注入样本的约束解码防御实证、增强能力天花板的量化、全评测基线 seed 固定可复现
+3. 生产服务按 EXP-006 协议（pkill + 30s 冷却 + setsid）重启并端到端验证通过
+
+---
+
 
 

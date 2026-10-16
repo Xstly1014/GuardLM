@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import time
+from collections import Counter
 
 from .backend import TransformersBackend, VLLMBackend
 from .parse import parse_pred
@@ -26,6 +27,9 @@ EVAL_FILES = {
     "T3": "t3.jsonl",
     "P5": "probe_slang.jsonl",  # M5 黑话探针集（CPT 消融专用，20 条留出词）
 }
+# 评测协议基准条数（EXP-007 B2）：T2 = variants 130 + sp_attack 120；
+# t2_mothers.jsonl 130 条为母本池，不入评测基准
+EXPECTED_COUNTS = {"T1": 250, "T2": 250, "T3": 150, "P5": 20}
 
 
 def load_eval(eval_dir, tiers):
@@ -36,11 +40,19 @@ def load_eval(eval_dir, tiers):
         for fname in files:
             path = os.path.join(eval_dir, fname)
             if not os.path.exists(path):
-                continue
+                # EXP-007 B2: 评测文件缺失必须 fail-fast。静默跳过会造成
+                # "650 条变 600 条"级别的口径漂移，历史报告数字失去可比性
+                raise FileNotFoundError(f"评测文件缺失: {path} (tier {tier})")
             with open(path, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         rows.append(json.loads(line))
+    # 条数断言：与评测协议基准比对，不符即拒绝出报告
+    got = Counter(r["tier"] for r in rows)
+    errs = [f"{t}: got {got.get(t, 0)} != expected {EXPECTED_COUNTS[t]}"
+            for t in tiers if got.get(t, 0) != EXPECTED_COUNTS[t]]
+    if errs:
+        raise SystemExit("[eval] 条数断言失败(评测协议被破坏): " + "; ".join(errs))
     return rows
 
 
@@ -62,6 +74,8 @@ def main():
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--max-new-tokens", type=int, default=64)
     ap.add_argument("--limit", type=int, default=0, help="调试用：只跑前 N 条")
+    ap.add_argument("--seed", type=int, default=2026,
+                    help="采样 seed（transformers 后端固定采样流，评测可复现）")
     ap.add_argument("--tag", default="", help="报告标题后缀")
     args = ap.parse_args()
 
@@ -83,6 +97,9 @@ def main():
                               structured=args.structured)
     else:
         backend = TransformersBackend(args.model, base_path=args.base)
+        # EXP-007 C2: 固定采样 seed，transformers 评测可复现
+        import torch
+        torch.manual_seed(args.seed)
     prompts = [(r["instruction"], r["input"]) for r in data]
 
     t0 = time.time()

@@ -76,13 +76,14 @@ Safety-Prompts 的类型是"安全议题域"而非"违规判定"，三类为混�
 - 类别配额：insult 55% / illegal 30% / porn 8% / ads 7%（受池内实际存量约束，porn/ads 依赖合成补量）
 - 增强配对：基样本入选时其变体以 0.5 概率随行（变体始终与母本同侧，杜绝跨侧泄漏）
 - DPO 采样：38,689 组偏好对中随机抽 2,000（M3 使用）
+- Provenance（EXP-007）：SFT/DPO 输出保留 `id`/`origin_id`（DPO 偏好对按采样序生成 `cvalues:pref:xxxxxx`），训练侧全量可溯源，leak_check 的 origin 关联校验由此生效
 
 ## 4. 清洗规则
 
 1. **长度**：`6 < len(text) < 256`（过短无语义、过长截断）
 2. **噪声**：去空/纯符号/纯 emoji（NFKC 归一 + 表情区段剔除后判空）
 3. **标签**：缺失/不可解析丢弃
-4. **去重**：同源精确去重（md5 整行）→ 跨源 MinHashLSH（num_perm=64, Jaccard≥0.9）
+4. **去重**：同源精确去重（md5 对 `input` 文本字段，其余字段不参与）→ 跨源 MinHashLSH（num_perm=64, Jaccard≥0.9）
 5. **ads 判例**：COLD none 池按导流强特征词表（`加微信/扫码/免费领/刷单/兼职+赚钱…`）重标 ads（25 条）；SP Role_Play 按内容细分 porn/illegal
 6. **CValues**：prompt 精确去重（116,536 行 → 38,689 唯一 prompt，保留首条偏好对）
 

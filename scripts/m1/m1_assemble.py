@@ -8,6 +8,10 @@ M1 收尾: 最终训练集组装。
   2) DPO: cvalues.pref.jsonl 采样 --n-dpo 条
   3) 输出 data/sft/train.jsonl + data/rl/train_pref.jsonl（M2/M3 直用）
 
+Provenance 铁律（EXP-007）: 输出必须保留 id/origin_id，供 leak_check 做
+origin 关联校验；DPO 偏好对上游无 id，按采样后顺序生成确定性 id（seed 固定可复现）。
+LLaMA-Factory 读取时忽略额外字段，不影响训练。
+
 用法:
   python scripts/m1_assemble.py --risk 3000 --ratio 3 --aug-pair-rate 0.5 --n-dpo 2000
 """
@@ -82,18 +86,21 @@ def main():
                 "input": r["input"],
                 "output": r["output"],
                 "source": r.get("source", ""),
+                "id": r.get("id", ""),
+                "origin_id": r.get("origin_id", ""),
             }, ensure_ascii=False) + "\n")
 
-    # ---- DPO 偏好对 ----
+    # ---- DPO 偏好对（id 按采样后顺序生成，确定性） ----
     random.shuffle(prefs)
     dpo = prefs[:args.n_dpo]
     with open(os.path.join(BASE, args.out_rl), "w", encoding="utf-8") as f:
-        for r in dpo:
+        for i, r in enumerate(dpo):
             f.write(json.dumps({
                 "prompt": r["prompt"],
                 "chosen": r["chosen"],
                 "rejected": r["rejected"],
                 "source": "cvalues",
+                "id": f"cvalues:pref:{i:06d}",
             }, ensure_ascii=False) + "\n")
 
     lab_cnt = Counter(json.loads(r["output"])["label"] for r in sft)
